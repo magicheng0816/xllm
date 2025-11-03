@@ -389,3 +389,9 @@ DEFINE_string(reasoning_parser,
 
 // --- qwen3 reranker config ---
 DEFINE_bool(enable_qwen3_reranker, false, "Whether to enable qwen3 reranker.");
+
+// T5 prefill-only mode
+DEFINE_bool(enable_t5_prefill_only,
+            false,
+            "Enable T5 prefill-only mode (no decoder self-attention blocks "
+            "allocation)");

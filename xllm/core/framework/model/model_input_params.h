@@ -94,6 +94,8 @@ struct ModelInputParams {
     // Copy graph_buffer to device
     params.graph_buffer = safe_to(graph_buffer, device, true);
 
+    //@TODO: rec params
+
     return params;
   }
 
@@ -193,6 +195,28 @@ struct ModelInputParams {
   // Graph execution buffer for temporary tensor storage
   // Used by ACL Graph Executor to avoid repeated memory allocation
   torch::Tensor graph_buffer;
+
+  enum class T5Stage {
+    PREFILL,  // Prefill stage
+    DECODE    // Decode stage
+  };
+  T5Stage t5_stage = T5Stage::PREFILL;
+
+  std::vector<int32_t>
+      encoder_seq_lens;  // Length of encoder output sequence for each sequence
+  torch::Tensor
+      encoder_seq_lens_tensor;  // Pre-constructed tensor for encoder_seq_lens
+  int32_t encoder_max_seq_len = 0;  // max encoder seq len
+
+  torch::Tensor kv_cu_seq_lens;  //  kv len: (tokens in cache + new tokens)
+  std::vector<int> kv_cu_seq_lens_vec;
+
+  int64_t bs = 0;
+  bool is_hybrid_mode = false;
+  int64_t group_width = 0;
+
+  // generate rec: decoder embedding
+  torch::Tensor decoder_context_embedding;
 };
 
 }  // namespace xllm
