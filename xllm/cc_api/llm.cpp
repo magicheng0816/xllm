@@ -1,106 +1,143 @@
 #include "llm.h"
 
+#include <folly/Unit.h>
+#include <folly/experimental/coro/Timeout.h>
+#include <folly/futures/Future.h>
+#include <glog/logging.h>
+
+#include <exception>
+
 #include "internal.h"
 
 namespace xllm {
-LLM::LLM() : initialized_(false), llm_core_(nullptr) {}
-
+LLM::LLM() = default;
 LLM::~LLM() {
-  delete llm_core_->master;
-  delete llm_core_;
-  llm_core_ = nullptr;
+  if (nullptr != llm_core_) {
+    delete llm_core_;
+    llm_core_ = nullptr;
+  }
 }
 
 bool LLM::Initialize(const std::string& model_path,
                      const std::string& devices,
                      const XLLM_InitLLMOptions& init_options) {
+  if (initialized_) {
+    LOG(WARNING) << "LLM is already initialized";
+    return false;
+  }
+
   if (!std::filesystem::exists(model_path)) {
     LOG(ERROR) << "model path[" << model_path << "] does not exist";
     return false;
   }
 
-  std::filesystem::path model_path_fs =
-      std::filesystem::path(model_path).lexically_normal();
-  if (model_path_fs.has_filename()) {
-    model_ids_.emplace_back(std::filesystem::path(model_path).filename());
-  } else {
-    model_ids_.emplace_back(
-        std::filesystem::path(model_path).parent_path().filename());
+  try {
+    Options options;
+    options.model_path(model_path)
+        .task_type(init_options.task)
+        .devices(devices)
+        .draft_model_path(init_options.draft_model)
+        .draft_devices(init_options.draft_devices)
+        .backend("llm")
+        .block_size(init_options.block_size)
+        .max_cache_size(init_options.max_cache_size)
+        .max_memory_utilization(init_options.max_memory_utilization)
+        .enable_prefix_cache(!init_options.disable_prefix_cache)
+        .max_tokens_per_batch(init_options.max_tokens_per_batch)
+        .max_seqs_per_batch(init_options.max_seqs_per_batch)
+        .max_tokens_per_chunk_for_prefill(
+            init_options.max_tokens_per_chunk_for_prefill)
+        .num_speculative_tokens(init_options.num_speculative_tokens)
+        .num_request_handling_threads(init_options.num_request_handling_threads)
+        .communication_backend(init_options.communication_backend)
+        .rank_tablefile(init_options.rank_tablefile)
+        .expert_parallel_degree(init_options.expert_parallel_degree)
+        .enable_mla(init_options.enable_mla)
+        .enable_chunked_prefill(!init_options.disable_chunked_prefill)
+        .master_node_addr(init_options.master_node_addr)
+        .device_ip(init_options.device_ip)
+        .transfer_listen_port(init_options.transfer_listen_port)
+        .nnodes(init_options.nnodes)
+        .node_rank(init_options.node_rank)
+        .dp_size(init_options.dp_size)
+        .ep_size(init_options.ep_size)
+        .xservice_addr(init_options.xservice_addr)
+        .instance_name(init_options.instance_name)
+        .enable_disagg_pd(init_options.enable_disagg_pd)
+        .enable_schedule_overlap(init_options.enable_schedule_overlap)
+        .enable_pd_ooc(init_options.enable_pd_ooc)
+        .kv_cache_transfer_mode(init_options.kv_cache_transfer_mode)
+        .disable_ttft_profiling(init_options.disable_ttft_profiling)
+        .enable_forward_interruption(init_options.enable_forward_interruption)
+        .enable_shm(init_options.enable_shm)
+        .is_local(init_options.is_local);
+
+    llm_core_ = new LLMCore();
+    llm_core_->master = std::make_unique<LLMMaster>(options);
+    llm_core_->master->run();
+
+    size_t cpu_cores = std::thread::hardware_concurrency();
+    size_t thread_num = std::clamp((cpu_cores == 0) ? 8 : cpu_cores / 2,
+                                   static_cast<size_t>(4),
+                                   static_cast<size_t>(16));
+    llm_core_->executor =
+        std::make_unique<folly::CPUThreadPoolExecutor>(thread_num);
+
+    std::filesystem::path model_path_fs =
+        std::filesystem::path(model_path).lexically_normal();
+    std::string model_id;
+    if (model_path_fs.has_filename()) {
+      model_id = model_path_fs.filename().string();
+    } else if (!model_path_fs.empty()) {
+      model_id = model_path_fs.string();
+    } else {
+      model_id = "default";
+    }
+    llm_core_->model_ids.emplace_back(model_id);
+
+    initialized_ = true;
+
+    return true;
+  } catch (const std::exception& e) {
+    LOG(ERROR) << "LLM initialization failed: " << e.what();
+    if (nullptr != llm_core_) {
+      delete llm_core_;
+      llm_core_ = nullptr;
+    }
+    initialized_ = false;
+    return false;
   }
-
-  xllm::Options options;
-  options.model_path(model_path)
-      .task_type(init_options.task)
-      .devices(devices)
-      .draft_model_path(init_options.draft_model)
-      .draft_devices(init_options.draft_devices)
-      .backend("llm")
-      .block_size(init_options.block_size)
-      .max_cache_size(init_options.max_cache_size)
-      .max_memory_utilization(init_options.max_memory_utilization)
-      .enable_prefix_cache(!init_options.disable_prefix_cache)
-      .max_tokens_per_batch(init_options.max_tokens_per_batch)
-      .max_seqs_per_batch(init_options.max_seqs_per_batch)
-      .max_tokens_per_chunk_for_prefill(
-          init_options.max_tokens_per_chunk_for_prefill)
-      .num_speculative_tokens(init_options.num_speculative_tokens)
-      .num_request_handling_threads(init_options.num_request_handling_threads)
-      .communication_backend(init_options.communication_backend)
-      .rank_tablefile(init_options.rank_tablefile)
-      .expert_parallel_degree(init_options.expert_parallel_degree)
-      .enable_mla(init_options.enable_mla)
-      .enable_chunked_prefill(!init_options.disable_chunked_prefill)
-      .master_node_addr(init_options.master_node_addr)
-      .device_ip(init_options.device_ip)
-      .transfer_listen_port(init_options.transfer_listen_port)
-      .nnodes(init_options.nnodes)
-      .node_rank(init_options.node_rank)
-      .dp_size(init_options.dp_size)
-      .ep_size(init_options.ep_size)
-      .xservice_addr(init_options.xservice_addr)
-      .instance_name(init_options.instance_name)
-      .enable_disagg_pd(init_options.enable_disagg_pd)
-      .enable_schedule_overlap(init_options.enable_schedule_overlap)
-      .enable_pd_ooc(init_options.enable_pd_ooc)
-      .kv_cache_transfer_mode(init_options.kv_cache_transfer_mode)
-      .disable_ttft_profiling(init_options.disable_ttft_profiling)
-      .enable_forward_interruption(init_options.enable_forward_interruption)
-      .enable_shm(init_options.enable_shm)
-      .is_local(init_options.is_local);
-
-  llm_core_ = new LLMCore();
-  llm_core_->master = new xllm::LLMMaster(options);
-  llm_core_->master->run();
-
-  initialized_ = true;
-
-  return true;
 }
 
-void LLM::Generate(const std::string& model_id,
-                   const std::string& prompt,
-                   const XLLM_RequestParams& request_params,
-                   XLLM_OutputCallback callback) {
-  if (!initialized_) {
-    LOG(FATAL) << "LLM is not initialized";
+XLLM_Response LLM::Completions(const std::string& model_id,
+                               const std::string& prompt,
+                               uint32_t timeout_ms,
+                               const XLLM_RequestParams& request_params) {
+  return detail::handle_inference_request(llm_core_,
+                                          model_id,
+                                          prompt,
+                                          timeout_ms,
+                                          request_params,
+                                          detail::InterfaceType::COMPLETIONS);
+}
+
+XLLM_Response LLM::ChatCompletions(
+    const std::string& model_id,
+    const std::vector<XLLM_ChatMessage>& messages,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams& request_params) {
+  std::vector<Message> internal_messages;
+  internal_messages.reserve(messages.size());
+  for (const auto& msg : messages) {
+    internal_messages.emplace_back(msg.role, msg.content);
   }
 
-  xllm::RequestParams xllm_request_params =
-      xllm::utils::transfer_request_params(request_params);
-
-  std::string request_id = xllm_request_params.request_id;
-  int64_t created_time = absl::ToUnixSeconds(absl::Now());
-
-  llm_core_->master->handle_request(
-      prompt,
-      std::nullopt,
-      xllm_request_params,
-      std::nullopt,
-      [model_id, request_id, created_time, callback](
-          const xllm::RequestOutput& req_output) -> bool {
-        XLLM_Response xllm_response = xllm::utils::build_xllm_response(
-            req_output, request_id, created_time, model_id);
-        return callback(xllm_response);
-      });
+  return detail::handle_inference_request(
+      llm_core_,
+      model_id,
+      internal_messages,
+      timeout_ms,
+      request_params,
+      detail::InterfaceType::CHAT_COMPLETIONS);
 }
 }  // namespace xllm

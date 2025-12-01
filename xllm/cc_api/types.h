@@ -33,6 +33,15 @@ using OptString = std::optional<std::string>;
 using OptStringVec = std::optional<std::vector<std::string>>;
 using OptInt32Vec = std::optional<std::vector<int32_t>>;
 
+struct XLLM_CAPI_EXPORT XLLM_ChatMessage {
+  // the role of the messages author. One of "system", "user", "assistant".
+  std::string role;
+
+  // the content of the message. null for assistant messages with function
+  // calls.
+  std::string content;
+};
+
 struct XLLM_CAPI_EXPORT XLLM_InitLLMOptions {
   // Whether to enable multi-head latent attention
   bool enable_mla = false;
@@ -143,9 +152,6 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
 
   OptBool offline;
 
-  // options for streaming response. Only set this when you set stream: true
-  OptBool streaming;
-
   // include the log probabilities of the chosen tokens. the maximum value is 5.
   OptBool logprobs;
 
@@ -173,6 +179,10 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   OptInt32 slo_ms;
 
   OptInt32 beam_width;
+
+  // the number of log probabilities to include in the response, between [0,
+  // 20]. default = 0
+  OptInt32 top_logprobs;
 
   // top_k sampling cutoff, default = -1 (no cutoff)
   OptInt64 top_k;
@@ -202,6 +212,10 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
 
   OptString service_request_id;
 
+  // A unique identifier representing your end-user, which can help system to
+  // monitor and detect abuse.
+  OptString user;
+
   // up to 4 sequences where the API will stop generating further tokens.
   OptStringVec stop;
 
@@ -209,12 +223,13 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   OptInt32Vec stop_token_ids;
 };
 
-struct XLLM_CAPI_EXPORT XLLM_LogProbs {
-  std::vector<float> token_logprobs;
-
-  std::vector<std::string> tokens;
-
-  std::vector<int32_t> token_ids;
+enum XLLM_CAPI_EXPORT XLLM_StatusCode {
+  kSuccess = 0,         // Request succeeded
+  kNotInitialized = 1,  // LLM instance not initialized
+  kModelNotFound = 2,   // Specified model ID not loaded
+  kTimeout = 3,         // Request timed out
+  kInvalidRequest = 4,  // Invalid input parameters
+  kInternalError = 5,   // Internal system error
 };
 
 struct XLLM_CAPI_EXPORT XLLM_Usage {
@@ -228,17 +243,46 @@ struct XLLM_CAPI_EXPORT XLLM_Usage {
   int32_t total_tokens;
 };
 
+struct XLLM_CAPI_EXPORT XLLM_LogProbData {
+  // token
+  std::string token;
+
+  // the token id.
+  int32_t token_id;
+
+  // the log probability of the token.
+  float logprob;
+};
+
+struct XLLM_CAPI_EXPORT XLLM_LogProb {
+  // token
+  std::string token;
+
+  // the token id.
+  int32_t token_id;
+
+  // the log probability of the token.
+  float logprob;
+
+  // the log probability of top tokens.
+  std::vector<XLLM_LogProbData> top_logprobs;
+};
+
 struct XLLM_CAPI_EXPORT XLLM_Choice {
   // the index of the generated completion
   uint32_t index;
 
-  // the generated text
-  std::string text;
+  // the generated text for completions inference
+  std::optional<std::string> text;
 
-  uint64_t item_id;
+  // the generated item for rec inference
+  std::optional<uint64_t> item_id;
 
-  // the log probability of of output tokens.
-  XLLM_LogProbs logprobs;
+  // the generated message for chatcompletions inference
+  std::optional<XLLM_ChatMessage> message;
+
+  // the log probabilities of output tokens.
+  std::optional<std::vector<XLLM_LogProb>> logprobs;
 
   // the reason of the model stoped generating tokens.
   // "stop" - the model hit a natural stop point or a provided stop sequence.
@@ -248,6 +292,12 @@ struct XLLM_CAPI_EXPORT XLLM_Choice {
 };
 
 struct XLLM_CAPI_EXPORT XLLM_Response {
+  // Return code indicating request status (0 = success, non-zero = error)
+  XLLM_StatusCode status_code = XLLM_StatusCode::kSuccess;
+
+  // Optional error details (populated if status_code != kSuccess)
+  std::string error_info;
+
   // unique id for the completion request
   std::string id;
 
@@ -266,11 +316,5 @@ struct XLLM_CAPI_EXPORT XLLM_Response {
   // usage statistics for the completion request.
   XLLM_Usage usage;
 };
-
-// callback function for output, return true to continue, false to stop/cancel
-using XLLM_OutputCallback = std::function<bool(XLLM_Response output)>;
-
-using XLLM_BatchOutputCallback =
-    std::function<bool(size_t index, XLLM_Response output)>;
 
 }  // namespace xllm
