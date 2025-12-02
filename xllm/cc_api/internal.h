@@ -21,6 +21,7 @@ limitations under the License.
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
 #include "core/runtime/llm_master.h"
+#include "core/util/uuid.h"
 #include "types.h"
 
 namespace xllm {
