@@ -15,7 +15,11 @@ limitations under the License.
 
 #pragma once
 
+#if defined(USE_NPU)
 #include <atb/atb_infer.h>
+
+#include "xllm_kernels/core/include/atb_speed/log.h"
+#endif
 #include <c10/core/ScalarType.h>
 #include <glog/logging.h>
 #include <torch/torch.h>
@@ -35,7 +39,6 @@ limitations under the License.
 #include "processors/qwen2_vl_image_processor.h"
 #include "qwen2_5_vl.h"
 #include "qwen3_vl.h"
-#include "xllm_kernels/core/include/atb_speed/log.h"
 
 namespace xllm {
 
@@ -74,12 +77,12 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     return inputs_embeds;
   }
 
-  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
-                        const std::vector<torch::Tensor>& positions,
+  torch::Tensor forward(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
-                        const std::vector<ModelInputParams>& input_params) {
+                        const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
-    const auto& mm_data = input_params[0].mm_data;
+    const auto& mm_data = input_params.mm_data;
     torch::Tensor pixel_values;
     if (const auto& res = mm_data.get<torch::Tensor>("pixel_values"))
       pixel_values = res.value();
@@ -93,9 +96,9 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
     if (pixel_values.defined() && image_grid_thw.defined())
       image_inputs = Qwen3_VLImageInputs{pixel_values, image_grid_thw};
 
-    auto inputs_embeds = get_input_embeddings(
-        tokens[0], image_inputs, video_inputs, input_params[0]);
-    input_params[0].input_embedding = inputs_embeds;
+    auto inputs_embeds =
+        get_input_embeddings(tokens, image_inputs, video_inputs, input_params);
+    input_params.input_embedding = inputs_embeds;
     auto emb = language_model_(tokens, positions, kv_caches, input_params);
 
     return emb;
@@ -111,9 +114,11 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
       visual_->load_state_dict(
           state_dict->get_dict_with_prefix("model.visual."));
     }
+#if defined(USE_NPU)
     // verify
     visual_->verify_loaded_weights("model.visual.");
     visual_->merge_loaded_weights();
+#endif
     if (!model_args_.image_embedding_mode()) {
       language_model_->load_model(std::move(loader), "model.language_model.");
     }
@@ -122,11 +127,11 @@ class Qwen3_VLMoeForConditionalGenerationImpl : public torch::nn::Module {
   layer::LmHead get_lm_head() { return language_model_->get_lm_head(); }
   void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  layer::WordEmbedding get_word_embedding() {
     return language_model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
   }
 

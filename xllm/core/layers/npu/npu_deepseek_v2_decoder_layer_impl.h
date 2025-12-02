@@ -80,11 +80,8 @@ class ExpertBuffer {
     } else {
       auto validate_shape = [](const torch::Tensor& t,
                                const std::vector<int64_t>& expected) {
-        TORCH_CHECK(t.sizes() == expected,
-                    "Shape mismatch. Expected ",
-                    expected,
-                    " got ",
-                    t.sizes());
+        CHECK_EQ(t.sizes(), expected)
+            << "Shape mismatch. Expected " << expected << " got " << t.sizes();
       };
 
       validate_shape(gateup_weight, gateup_weight_shape);
@@ -126,15 +123,14 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
 
   virtual int64_t init_layer() override;
 
-  torch::Tensor forward(std::vector<torch::Tensor>& x,
-                        std::vector<torch::Tensor>& cos_pos,
-                        std::vector<torch::Tensor>& sin_pos,
-                        std::vector<torch::Tensor>& attn_mask,
+  torch::Tensor forward(torch::Tensor& x,
+                        torch::Tensor& cos_pos,
+                        torch::Tensor& sin_pos,
+                        torch::Tensor& attn_mask,
                         KVCache& kv_cache,
-                        const std::vector<ModelInputParams>& input_params,
-                        std::vector<aclrtEvent*> event = {nullptr, nullptr},
-                        std::vector<std::atomic<bool>*> event_flag = {nullptr,
-                                                                      nullptr},
+                        const ModelInputParams& input_params,
+                        aclrtEvent* event = nullptr,
+                        std::atomic<bool>* event_flag = nullptr,
                         int node_id = 0);
 
  private:
@@ -268,15 +264,14 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
   int64_t init_node(atb_speed::Model::Node& node,
                     atb_speed::deepseekV2::DecoderLayerParam& param);
 
-  void build_node_variant_pack(
-      atb_speed::Model::Node& node,
-      std::vector<torch::Tensor>& x,
-      std::vector<torch::Tensor>& cos_pos,
-      std::vector<torch::Tensor>& sin_pos,
-      std::vector<torch::Tensor>& attn_mask,
-      KVCache& kv_cache,
-      const std::vector<ModelInputParams>& input_params,
-      bool is_prefill);
+  void build_node_variant_pack(atb_speed::Model::Node& node,
+                               torch::Tensor& x,
+                               torch::Tensor& cos_pos,
+                               torch::Tensor& sin_pos,
+                               torch::Tensor& attn_mask,
+                               KVCache& kv_cache,
+                               ModelInputParams& input_params,
+                               bool is_prefill);
 
   torch::Tensor block_tables_placeholder_;
   std::string model_name_;
@@ -320,7 +315,6 @@ class NpuDeepseekV2DecoderLayerImpl : public NpuBaseLayer {
   atb_speed::Model::Node decode_mla_node_;
 
   atb::Tensor internal_tensor_;
-  atb::Tensor internal_tensor_auxiliary_;
 
   torch::Tensor at_cumsum_;
   torch::Tensor tensor_placeholder_;

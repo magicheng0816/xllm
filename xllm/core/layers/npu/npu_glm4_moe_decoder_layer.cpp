@@ -109,9 +109,9 @@ enum DecoderLayerTensorId : int {
   K_NORM_WEIGHT = 69
 };
 
-static const uint64_t WEIGHT_COUNT_PER_LAYER = 70;
+static uint64_t WEIGHT_COUNT_PER_LAYER = 68;
 
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
+static std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
 
     {"self_attn.q_proj.weight", IN_QKV_WEIGHT_0},
@@ -124,9 +124,6 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
     {"self_attn.v_proj.bias", IN_QKV_BIAS_2},
 
     {"self_attn.o_proj.weight", IN_QKV_DENSE_WEIGHT},
-
-    {"self_attn.q_norm.weight", Q_NORM_WEIGHT},
-    {"self_attn.k_norm.weight", K_NORM_WEIGHT},
 
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
 
@@ -156,7 +153,7 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING = {
 
 };
 
-static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
+static std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"input_layernorm.weight", IN_INPUT_NORM_WEIGHT},
     {"input_layernorm.bias", IN_INPUT_NORM_NEW_BIAS},
 
@@ -179,9 +176,6 @@ static const std::unordered_map<std::string, int> WEIGHT_MAPPING_W8A8 = {
     {"self_attn.o_proj.deq_scale", IN_QKV_DENSE_DESCALE},
     {"self_attn.o_proj.weight_offset", IN_QKV_DENSE_OFFSET},
     {"self_attn.o_proj.weight_scale", IN_QKV_DENSE_SCALE},
-
-    {"self_attn.q_norm.weight", Q_NORM_WEIGHT},
-    {"self_attn.k_norm.weight", K_NORM_WEIGHT},
 
     {"post_attention_layernorm.weight", IN_POST_ATTN_NORM_WEIGHT},
     {"post_attention_layernorm.bias", IN_POST_ATTN_NORM_NEW_BIAS},
@@ -388,7 +382,12 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
 
   param.mlpLinearTransposeType = {1, -1, 1, -1};
 
-  param.enableSplitFuse = FLAGS_enable_chunked_prefill && is_prefill;
+  param.enableSplitFuse =
+      (FLAGS_enable_chunked_prefill || FLAGS_enable_prefix_cache) && is_prefill;
+
+  // not support MTP model yet
+  param.enableAclGraph =
+      FLAGS_enable_acl_graph && !is_prefill && args.n_layers() > 1;
 
   param.moeLinearTransposeType = (layer_id_ < args.first_k_dense_replace())
                                      ? std::vector<int>{-1, -1, -1, -1}
@@ -411,7 +410,14 @@ void Glm4MoeDecoderImpl::initialize_basic_parameters(
   param.enableSpeculate = false;                    // MTP
   param.enableSwiGLUQuantForSharedExperts = false;  // TODO
 
-  param.useQKNorm = true;
+  param.useQKNorm = args.use_qk_norm();
+  if (args.use_qk_norm()) {
+    WEIGHT_COUNT_PER_LAYER = 70;
+    WEIGHT_MAPPING_W8A8["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
+    WEIGHT_MAPPING_W8A8["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
+    WEIGHT_MAPPING["self_attn.q_norm.weight"] = Q_NORM_WEIGHT;
+    WEIGHT_MAPPING["self_attn.k_norm.weight"] = K_NORM_WEIGHT;
+  }
   param.hiddenSizePerAttentionHead = args.head_dim();
   std::optional<long int> optionalValue = args.n_kv_heads();
   param.numKeyValueHeadsPerRank = std::max(
@@ -1073,20 +1079,20 @@ int64_t Glm4MoeDecoderImpl::init_node(atb_speed::Model::Node& node,
   return atb::NO_ERROR;
 }
 
-torch::Tensor Glm4MoeDecoderImpl::forward(
-    torch::Tensor& x,
-    torch::Tensor& cos_pos,
-    torch::Tensor& sin_pos,
-    torch::Tensor& attn_mask,
-    KVCache& kv_cache,
-    const ModelInputParams& input_params,
-    torch::Tensor& expert_array,
-    std::vector<aclrtEvent*> event,
-    std::vector<std::atomic<bool>*> event_flag,
-    int node_id) {
+torch::Tensor Glm4MoeDecoderImpl::forward(torch::Tensor& x,
+                                          torch::Tensor& cos_pos,
+                                          torch::Tensor& sin_pos,
+                                          torch::Tensor& attn_mask,
+                                          KVCache& kv_cache,
+                                          const ModelInputParams& input_params,
+                                          torch::Tensor& expert_array,
+                                          aclrtEvent* event,
+                                          std::atomic<bool>* event_flag,
+                                          int node_id) {
   atb::Status st;
-  if (input_params.decode_seq_range.second !=
-      input_params.q_seq_lens.size(0) - 1) {
+  bool is_prefill = input_params.decode_seq_range.second !=
+                    input_params.q_seq_lens.size(0) - 1;
+  if (is_prefill) {
     build_node_variant_pack(prefill_node_,
                             x,
                             cos_pos,
@@ -1198,6 +1204,13 @@ void Glm4MoeDecoderImpl::build_node_variant_pack(
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
   node.variantPack.inTensors.at(input_idx++) =
       atb_speed::Utils::AtTensor2Tensor(tensor_placeholder_);
+
+  if (FLAGS_enable_acl_graph && !is_prefill &&
+      input_params.graph_buffer.tiling_data.defined()) {
+    node.variantPack.inTensors.at(input_idx++) =
+        atb_speed::Utils::AtTensor2Tensor(
+            input_params.graph_buffer.tiling_data);
+  }
 
   for (size_t i = 0; i < WEIGHT_COUNT_PER_LAYER; ++i) {
     CHECK_THROW(node.inTensors.at(i) == nullptr,

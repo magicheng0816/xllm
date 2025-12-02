@@ -87,6 +87,8 @@ DECLARE_bool(enable_acl_graph);
 
 DECLARE_int32(max_seq_len_for_graph_mode);
 
+DECLARE_bool(enable_acl_graph_no_padding);
+
 DECLARE_bool(enable_chunked_prefill);
 
 DECLARE_string(master_node_addr);
@@ -210,3 +212,5 @@ DECLARE_bool(enable_shm);
 DECLARE_bool(enable_prefetch_weight);
 
 DECLARE_int32(flashinfer_workspace_buffer_size);
+
+DECLARE_bool(enable_dp_balance);

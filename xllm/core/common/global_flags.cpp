@@ -89,9 +89,15 @@ DEFINE_bool(enable_acl_graph,
             "Whether to enable ACL graph execution for decode phase.");
 
 DEFINE_int32(max_seq_len_for_graph_mode,
-             20480,
-             "Maximum number of tokens per sequence for ACL graph execution.");
+             0,
+             "Maximum number of tokens per sequence for ACL graph execution. "
+             "If 0, use model max_position_embeddings.");
 
+DEFINE_bool(enable_acl_graph_no_padding,
+            false,
+            "Whether to enable ACL graph execution for decode phase without "
+            "padding. If true, graph will be caputured with every actual num "
+            "tokens, as stride is 1.");
 // --- vlm config ---
 
 DEFINE_int32(limit_image_per_prompt,
@@ -129,7 +135,7 @@ DEFINE_double(max_memory_utilization,
 
 DEFINE_int32(max_tokens_per_batch, 20480, "Max number of tokens per batch.");
 
-DEFINE_int32(max_seqs_per_batch, 256, "Max number of sequences per batch.");
+DEFINE_int32(max_seqs_per_batch, 1024, "Max number of sequences per batch.");
 
 DEFINE_bool(enable_schedule_overlap,
             true,
@@ -166,7 +172,7 @@ DEFINE_int32(ep_size, 1, "Expert parallel size for MoE model.");
 
 DEFINE_string(
     communication_backend,
-    "lccl",
+    "hccl",
     "NPU communication backend.(e.g. lccl, hccl). When enable dp, use hccl.");
 
 // --- ep load balance config ---
@@ -417,3 +423,17 @@ DEFINE_bool(
     "Whether to enable prefetch weight,only applicable to Qwen3-dense model."
     "The default prefetching ratio for gateup weight is 40%."
     "If adjustments are needed, e.g. export PREFETCH_COEFFOCIENT=0.5");
+
+// rec prefill-only mode
+DEFINE_bool(enable_rec_prefill_only,
+            false,
+            "Enable rec prefill-only mode (no decoder self-attention blocks "
+            "allocation).");
+
+// --- dp load balance ---
+
+DEFINE_bool(
+    enable_dp_balance,
+    false,
+    "Whether to enable dp load balance, if true, sequences within a single "
+    "dp batch will be shuffled.");

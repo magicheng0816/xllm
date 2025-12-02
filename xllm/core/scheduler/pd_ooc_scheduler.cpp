@@ -372,7 +372,11 @@ std::vector<Batch> PDOOCScheduler::prepare_batch() {
                                       running_sequences_,
                                       running_sequences_budgets_);
 
-  if (!batches[0].empty()) {
+  bool is_batches_empty =
+      (std::all_of(batches.begin(), batches.end(), [](const Batch& one_batch) {
+        return one_batch.empty();
+      }));
+  if (!is_batches_empty) {
     // only update the scheduling latency when there are requests to process
     COUNTER_ADD(scheduling_latency_seconds, timer.elapsed_seconds());
   }
@@ -1155,7 +1159,7 @@ void PDOOCScheduler::prepare_offline_dispatch_queue() {
     for (size_t i = 0; i < running_requests_.size(); ++i) {
       auto& request = running_requests_[i];
       if (request && request->offline() && !request->sequences().empty() &&
-          !request->sequences()[0]->is_prefill_stage()) {
+          !request->sequences()[0]->is_chunked_prefill_stage()) {
         size_t req_len = request->sequences()[0]->num_tokens();
         if (req_len <= max_len) {
           size_t diff = preferred_len > req_len ? preferred_len - req_len

@@ -17,7 +17,11 @@ limitations under the License.
 
 #include <torch/torch.h>
 
-#include "attention.h"
+#if defined(USE_MLU)
+#include "../mlu/attention.h"
+#elif defined(USE_CUDA)
+#include "../cuda/attention.h"
+#endif
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/model_args.h"
 #include "framework/parallel_state/parallel_args.h"
@@ -57,7 +61,7 @@ class Qwen2AttentionImpl : public torch::nn::Module {
   RmsNorm q_norm_{nullptr};
   RmsNorm k_norm_{nullptr};
   Attention attn_{nullptr};
-  RotaryEmbedding rotary_emb_{nullptr};
+  MRotaryEmbedding rotary_emb_{nullptr};
 };
 TORCH_MODULE(Qwen2Attention);
 

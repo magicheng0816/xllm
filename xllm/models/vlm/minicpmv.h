@@ -306,7 +306,7 @@ torch::Tensor get_1d_sincos_pos_embed_from_grid(int embed_dim,
                                                 std::pair<int, int> version = {
                                                     2,
                                                     0}) {
-  TORCH_CHECK(embed_dim % 2 == 0, "embed_dim must be even");
+  CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
 
   // compute omega
   auto omega = torch::arange(embed_dim / 2, torch::kFloat32);
@@ -332,7 +332,7 @@ torch::Tensor get_2d_sincos_pos_embed_from_grid(int embed_dim,
                                                 std::pair<int, int> version = {
                                                     2,
                                                     0}) {
-  TORCH_CHECK(embed_dim % 2 == 0, "embed_dim must be even");
+  CHECK_EQ(embed_dim % 2, 0) << "embed_dim must be even";
 
   auto emb_h =
       get_1d_sincos_pos_embed_from_grid(embed_dim / 2, grid[0], version);
@@ -382,7 +382,7 @@ class Resampler2_5Impl : public BaseResamplerImpl {
   }
 
   torch::Tensor forward(torch::Tensor x, torch::Tensor tgt_sizes) {
-    TORCH_CHECK(x.size(0) == tgt_sizes.size(0), "Batch size mismatch!");
+    CHECK_EQ(x.size(0), tgt_sizes.size(0)) << "Batch size mismatch!";
 
     int64_t batch_size = x.size(0);
     auto device = x.device();
@@ -975,12 +975,12 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     }
   }
 
-  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
-                        const std::vector<torch::Tensor>& positions,
+  torch::Tensor forward(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
-                        const std::vector<ModelInputParams>& input_params) {
+                        const ModelInputParams& input_params) {
     torch::NoGradGuard no_grad;
-    const auto& mm_data = input_params[0].mm_data;
+    const auto& mm_data = input_params.mm_data;
 
     torch::Tensor image_embeds;
     if (const auto& res = mm_data.get<torch::Tensor>("image_embeds"))
@@ -995,11 +995,10 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
     torch::Tensor image_embedding;
     std::optional<MiniCPMVImageInputs> image_inputs;
     if (image_embeds.defined()) {
-      image_inputs =
-          generate_image_inputs({}, tokens[0], image_embeds, tgt_sizes);
+      image_inputs = generate_image_inputs({}, tokens, image_embeds, tgt_sizes);
     } else if (pixel_values.size() > 0) {
       image_inputs = generate_image_inputs(
-          pixel_values, tokens[0], torch::Tensor(), tgt_sizes);
+          pixel_values, tokens, torch::Tensor(), tgt_sizes);
     }
     image_embedding = get_vision_embedding(image_inputs);
 
@@ -1011,8 +1010,8 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
       image_embedding = mlp_(image_embedding);
     }
 
-    input_params[0].input_embedding =
-        merge_text_vision_embeddings(tokens[0], image_inputs, image_embedding);
+    input_params.input_embedding =
+        merge_text_vision_embeddings(tokens, image_inputs, image_embedding);
 
     return language_model_(tokens, positions, kv_caches, input_params);
   }
@@ -1254,11 +1253,11 @@ class MiniCPMV2_6Impl : public torch::nn::Module {
 
   void set_lm_head(layer::LmHead& head) { language_model_->set_lm_head(head); }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  layer::WordEmbedding get_word_embedding() {
     return language_model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
     language_model_->set_word_embedding(word_embedding);
   }
 

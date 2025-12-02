@@ -21,6 +21,7 @@ limitations under the License.
 #if defined(USE_NPU)
 #include "platform/npu/npu_layer_synchronizer.h"
 #endif
+#include "framework/batch/batch_forward_type.h"
 #include "framework/request/mm_data.h"
 #include "npu_dp_ep_padding.h"
 #include "util/tensor_helper.h"
@@ -88,6 +89,7 @@ struct ModelInputParams {
     ModelInputParams params;
     params.empty_kv_cache = empty_kv_cache;
     params.global_empty_kv_cache = global_empty_kv_cache;
+    params.batch_forward_type = batch_forward_type;
     params.num_sequences = num_sequences;
     params.kv_max_seq_len = kv_max_seq_len;
     params.q_max_seq_len = q_max_seq_len;
@@ -108,7 +110,6 @@ struct ModelInputParams {
 
     params.mm_data = MMData::to(mm_data, device);
     params.dp_global_token_nums = dp_global_token_nums;
-    params.prefill_seq_len = prefill_seq_len;
     params.embedding_ids = std::move(embedding_ids);
     params.extra_token_ids = std::move(extra_token_ids);
     params.dp_ep_padding_data = dp_ep_padding_data;
@@ -128,7 +129,11 @@ struct ModelInputParams {
     params.kv_cache_start_offsets = safe_to(kv_cache_start_offsets, device);
 
     // Copy graph_buffer to device
-    params.graph_buffer = safe_to(graph_buffer, device, true);
+    // params.graph_buffer = safe_to(graph_buffer, device, true);
+    params.graph_buffer.attn_mask =
+        safe_to(graph_buffer.attn_mask, device, true);
+    params.graph_buffer.tiling_data =
+        safe_to(graph_buffer.tiling_data, device, true);
 
     // params for flashinfer
     params.paged_kv_indptr = safe_to(paged_kv_indptr, device);
@@ -145,8 +150,7 @@ struct ModelInputParams {
               << " , global_empty_kv_cache is " << global_empty_kv_cache
               << " , num_sequences is " << num_sequences
               << " , kv_max_seq_len is " << kv_max_seq_len
-              << " , q_max_seq_len is " << q_max_seq_len
-              << " , prefill_seq_len is " << prefill_seq_len;
+              << " , q_max_seq_len is " << q_max_seq_len;
     LOG(INFO) << "ModelInputParams: kv_seq_lens_vec is " << kv_seq_lens_vec;
     LOG(INFO) << "ModelInputParams: q_seq_lens_vec is " << q_seq_lens_vec;
     LOG(INFO) << "ModelInputParams: decode_seq_range is " << decode_seq_range;
@@ -159,6 +163,7 @@ struct ModelInputParams {
   }
   // whether the kv-cache is empty for all sequences.
   bool empty_kv_cache = true;
+  BatchForwardType batch_forward_type;
 
   // total number of sequences in the batch
   int32_t num_sequences = 0;
@@ -202,9 +207,6 @@ struct ModelInputParams {
   // whether the kv-cache is empty for all sequences,mainly used for dp case
   bool global_empty_kv_cache = true;
 
-  // num of prefill sequence in chunked prefill case
-  uint32_t prefill_seq_len = 0;
-
   // embedding ids of each sequence
   std::vector<int32_t> embedding_ids;
 
@@ -237,9 +239,6 @@ struct ModelInputParams {
   // kvcache offset of sequence in the xtensor for all layers
   // IntTensor: [n_seq]
   torch::Tensor kv_cache_start_offsets;
-  // Graph execution buffer for temporary tensor storage
-  // Used by ACL Graph Executor to avoid repeated memory allocation
-  torch::Tensor graph_buffer;
 
   // the indptr of the paged kv-cache
   // used in flashinfer
@@ -257,6 +256,12 @@ struct ModelInputParams {
   torch::Tensor paged_kv_last_page_len;
 
   uint64_t batch_id;
+
+  struct GraphBuffer {
+    torch::Tensor attn_mask;
+    torch::Tensor tiling_data;
+  };
+  GraphBuffer graph_buffer;
 };
 
 }  // namespace xllm

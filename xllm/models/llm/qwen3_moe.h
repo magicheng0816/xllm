@@ -204,20 +204,23 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
         positions = torch::tensor({0}).to(torch::kInt32).to(device_);
       }
     }
-#if defined(USE_NPU)
     auto inputs_embeds = input_params.input_embedding;
     torch::Tensor h;
     if (inputs_embeds.defined()) {
       h = inputs_embeds;
     } else {
+#if defined(USE_NPU)
       h = embed_tokens_(tokens, 0);
+#else
+      h = embed_tokens_(tokens);
+#endif
     }
-    int64_t input_length = h.size(0);
-    torch::Tensor expert_array = torch::arange(
-        0,
-        input_length * num_experts_per_tok_,
-        torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
+
+#if defined(USE_NPU)
     auto target_cos_sin = atb_pos_emb_(cos_sin_, positions, 0);
+#else
+    auto target_cos_sin = cos_sin_.index({positions});
+#endif
     auto target_cos_sin_chunks = target_cos_sin.chunk(/*chunks=*/2, /*dim=*/-1);
     auto cos_pos = target_cos_sin_chunks[0].contiguous();
     auto sin_pos = target_cos_sin_chunks[1].contiguous();
@@ -256,6 +259,12 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     }
     auto deep_stacks = input_params.deep_stacks;
     int deep_stack_size = deep_stacks.size();
+#if defined(USE_NPU)
+    int64_t input_length = h.size(0);
+    torch::Tensor expert_array = torch::arange(
+        0,
+        input_length * num_experts_per_tok_,
+        torch::TensorOptions().dtype(torch::kInt32).device(tokens.device()));
     for (size_t i = 0; i < layers_.size(); i++) {
       aclrtEvent* event = nullptr;
       std::atomic<bool>* event_flag = nullptr;
@@ -290,11 +299,17 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
     bool is_prefill = modified_input_params.q_max_seq_len > 1;
     auto attn_metadata =
         layer::AttentionMetadata::build(modified_input_params, is_prefill);
-    torch::Tensor h = embed_tokens_(tokens);
+    if (positions.dim() == 2) {
+      attn_metadata.mrope_cos = std::move(cos_pos);
+      attn_metadata.mrope_sin = std::move(sin_pos);
+    }
     for (size_t i = 0; i < layers_.size(); i++) {
       auto& layer = layers_[i];
       h = layer(
           h, positions, attn_metadata, kv_caches[i], modified_input_params);
+      if (deep_stack_size && i < deep_stack_size) {
+        h = deepstack_process(h, input_params.visual_pos_masks, deep_stacks[i]);
+      }
     }
     return norm_(h);
 #endif
@@ -331,12 +346,10 @@ class Qwen3MoeModelImpl : public torch::nn::Module {
   }
 #endif
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
-    return {embed_tokens_};
-  }
+  layer::WordEmbedding get_word_embedding() { return embed_tokens_; }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
-    embed_tokens_ = word_embedding[0];
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
+    embed_tokens_ = word_embedding;
   }
   torch::Tensor get_input_embeddings(torch::Tensor input_ids) {
 #if defined(USE_NPU)
@@ -382,11 +395,11 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
   // tokens: [num_tokens]
   // positions: [num_tokens] token pos in the sequence
   // returns: [num_tokens, hidden_size]
-  torch::Tensor forward(const std::vector<torch::Tensor>& tokens,
-                        const std::vector<torch::Tensor>& positions,
+  torch::Tensor forward(const torch::Tensor& tokens,
+                        const torch::Tensor& positions,
                         std::vector<KVCache>& kv_caches,
-                        const std::vector<ModelInputParams>& input_params) {
-    return model_(tokens[0], positions[0], kv_caches, input_params[0]);
+                        const ModelInputParams& input_params) {
+    return model_(tokens, positions, kv_caches, input_params);
   }
 
   // hidden_states: [num_tokens, hidden_size]
@@ -437,11 +450,11 @@ class Qwen3MoeForCausalLMImpl : public torch::nn::Module {
 
   void set_lm_head(layer::LmHead& head) { lm_head_ = head; }
 
-  std::vector<layer::WordEmbedding> get_word_embedding() {
+  layer::WordEmbedding get_word_embedding() {
     return model_->get_word_embedding();
   }
 
-  void set_word_embedding(std::vector<layer::WordEmbedding>& word_embedding) {
+  void set_word_embedding(layer::WordEmbedding& word_embedding) {
     model_->set_word_embedding(word_embedding);
   }
 

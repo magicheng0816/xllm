@@ -148,6 +148,7 @@ struct RawForwardInput {
   std::vector<int32_t> unique_token_lens_vec;
   bool empty_kv_cache = true;
   bool global_empty_kv_cache = true;
+  BatchForwardType batch_forward_type;
   uint32_t max_seq_len;
   uint32_t q_max_seq_len;
   std::vector<int32_t> seq_lens;
@@ -164,8 +165,6 @@ struct RawForwardInput {
   // chunked prefill case of speculative decoding
   // extra token ids for each sequence, and -1 for last chunk
   std::vector<int32_t> extra_token_ids;
-  // num of prefill sequence in chunked prefill case
-  uint32_t prefill_seq_len;
   // embedding ids of each sequence
   std::vector<int> embedding_ids;
   // swap

@@ -185,7 +185,7 @@ message ForwardInput {
   bool global_empty_kv_cache = 21;
   repeated TransferKVInfo transfer_kv_infos = 22;
   repeated Embeddings embeds = 23;
-  uint32 prefill_seq_len = 24;
+  // uint32 prefill_seq_len = 24;
   repeated int32 embedding_ids = 25;
   repeated int32 extra_token_ids = 26;
   EplbInfo eplb_info =27;
@@ -200,6 +200,7 @@ message ForwardInput {
   // beam search kernel
   repeated float acc_logprob_vec = 37;
   uint64 batch_id = 38;
+  int32 batch_forward_type = 39;
 }
 
  message BatchedForwardInputs {
@@ -254,7 +255,7 @@ service DistributeWorker {
   rpc GetCacheInfo(Empty) returns (CacheInfo) {}
   rpc LinkCluster(ClusterInfo) returns (Status) {}
   rpc UnlinkCluster(ClusterInfo) returns (Status) {}
-  rpc ExecuteModel (BatchedForwardInputs) returns (ForwardOutput);
+  rpc ExecuteModel (ForwardInput) returns (ForwardOutput);
   rpc GetLastStepResult (Empty) returns (ForwardOutput);
   rpc GetActiveActivationMemory (Empty) returns (ActivationMemory);
   rpc TransferBlocks(BlockTransferInfos) returns (TransferStatus) {}
