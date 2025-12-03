@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 /* Copyright 2025 The xLLM Authors. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,8 +13,6 @@ See the License for the specific language governing permissions and
 limitations under the License.
 ==============================================================================*/
 
-=======
->>>>>>> 27678e1 (feat: add calling xllm through the so form.)
 #include "llm.h"
 
 #include <folly/Unit.h>
