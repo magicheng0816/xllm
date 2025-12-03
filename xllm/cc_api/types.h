@@ -181,7 +181,11 @@ struct XLLM_CAPI_EXPORT XLLM_RequestParams {
   // multiple times. values between [0.0, 2.0]. 0.0 means no penalty. default =
   // 0.0 Positive values penalize new tokens based on their existing frequency
   // in the text.
+<<<<<<< HEAD
   float frequency_penalty = 0.0;
+=======
+  OptFloat frequency_penalty;
+>>>>>>> 27678e1 (feat: add calling xllm through the so form.)
 
   // presence penalty to reduce the likelihood of generating words already in
   // the prompt. values between [-2.0, 2.0]. Positive values penalize new tokens

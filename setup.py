@@ -650,16 +650,49 @@ if __name__ == "__main__":
     config = parse_arguments()
 
     arch = get_cpu_arch()
+<<<<<<< HEAD
     device = config['device']
     if device == 'auto':
         device = get_device_type()
     print(f"🚀 Build xllm with CPU arch: {arch} and target device: {device}")
+=======
+    install_kernels = True
+    generate_so = False
+    if '--device' in sys.argv:
+        idx = sys.argv.index('--device')
+        if idx + 1 < len(sys.argv):
+            device = sys.argv[idx+1].lower()
+            if device not in ('a2', 'a3', 'mlu', 'cuda'):
+                print("Error: --device must be a2 or a3 or mlu (case-insensitive)")
+                sys.exit(1)
+            # Remove the arguments so setup() doesn't see them
+            del sys.argv[idx]
+            del sys.argv[idx]
+    if '--dry_run' not in sys.argv:
+        pre_build()
+    else:
+        sys.argv.remove("--dry_run") 
+>>>>>>> 27678e1 (feat: add calling xllm through the so form.)
     
     if not config['dry_run']:
         pre_build()
 
     install_kernels = config['install_xllm_kernels']
     generate_so = config['generate_so']
+
+    if '--generate-so' in sys.argv:
+        idx = sys.argv.index('--generate-so')
+        if idx + 1 < len(sys.argv):
+            generate_so_val = sys.argv[idx+1].lower()
+            if generate_so_val in ('true', '1', 'yes', 'y', 'on'):
+                generate_so = True
+            elif generate_so_val in ('false', '0', 'no', 'n', 'off'):
+                generate_so = False
+            else:
+                print("Error: --generate-so must be true or false")
+                sys.exit(1)
+            sys.argv.pop(idx)
+            sys.argv.pop(idx)
 
     if "SKIP_TEST" in os.environ:
         BUILD_TEST_FILE = False
