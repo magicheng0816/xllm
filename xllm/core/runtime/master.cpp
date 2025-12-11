@@ -34,6 +34,7 @@ limitations under the License.
 #include "runtime/dit_master.h"
 #include "runtime/llm_engine.h"
 #include "runtime/llm_master.h"
+#include "runtime/rec_master.h"
 #include "runtime/speculative_engine.h"
 #include "runtime/vlm_engine.h"
 #include "runtime/vlm_master.h"
@@ -237,7 +238,11 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
 std::unique_ptr<Master> create_master(const std::string& backend,
                                       const Options& options) {
   if (backend == "llm") {
-    return std::make_unique<LLMMaster>(options);
+    if (options.task_type() == "rec") {
+      return std::make_unique<LLMRecMaster>(options);
+    } else {
+      return std::make_unique<LLMMaster>(options);
+    }
   } else if (backend == "vlm") {
     return std::make_unique<VLMMaster>(options);
   } else if (backend == "dit") {

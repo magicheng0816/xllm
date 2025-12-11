@@ -31,6 +31,7 @@ cc_library(
     speculative_engine.h
     speculative_worker_impl.h
     forward_shared_memory_manager.h
+    rec_worker_impl.h
   SRCS
     executor.cpp
     base_executor_impl.cpp
@@ -52,6 +53,7 @@ cc_library(
     speculative_engine.cpp
     speculative_worker_impl.cpp
     forward_shared_memory_manager.cpp
+    rec_worker_impl.cpp
   DEPS
     torch
     $<$<BOOL:${USE_NPU}>:torch_npu>
@@ -89,11 +91,13 @@ cc_library(
     master.h
     vlm_master.h
     dit_master.h
+    rec_master.h
   SRCS
     llm_master.cpp
     master.cpp
     vlm_master.cpp
     dit_master.cpp
+    rec_master.cpp
   DEPS
     :common
     :distributed_runtime

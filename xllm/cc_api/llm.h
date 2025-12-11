@@ -87,6 +87,28 @@ class XLLM_CAPI_EXPORT LLM {
                                 uint32_t timeout_ms,
                                 const XLLM_RequestParams& request_params);
 
+  /**
+   * @brief Generates completions based on low-level token/embedding inputs
+   * @param model_id ID of the loaded model
+   * @param input_tokens Optional vector of integer tokens
+   * @param input_indices Optional vector of integer indices mapping to
+   * input_tokens positions
+   * @param input_embedding Optional 2D vector of float embeddings (precomputed
+   * input embeddings) Shape: [num_tokens, embedding_dim]
+   * @param timeout_ms Timeout in milliseconds
+   * @param request_params Inference control parameters (temperature,
+   * max_tokens, beam_width, etc.)
+   * @return XLLM_Response Response containing generated token id
+
+   */
+  XLLM_Response BehaviorCompletions(
+      const std::string& model_id,
+      std::optional<std::vector<int>> input_tokens,
+      std::optional<std::vector<int>> input_indices,
+      std::optional<std::vector<std::vector<float>>> input_embedding,
+      uint32_t timeout_ms,
+      const XLLM_RequestParams& request_params);
+
  private:
   // Opaque pointer to internal LLM core implementation
   LLMCore* llm_core_ = nullptr;

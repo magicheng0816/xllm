@@ -83,8 +83,16 @@ bool LLM::Initialize(const std::string& model_path,
         .is_local(init_options.is_local);
 
     llm_core_ = new LLMCore();
-    llm_core_->master = std::make_unique<LLMMaster>(options);
-    llm_core_->master->run();
+    if (options.task_type() == "rec") {
+      llm_core_->llmrec_master = std::make_unique<LLMRecMaster>(options);
+      llm_core_->llmrec_master->run();
+    } else if (options.task_type() == "generate") {
+      llm_core_->llm_master = std::make_unique<LLMMaster>(options);
+      llm_core_->llm_master->run();
+    } else {
+      LOG(ERROR) << "Only support 'generate' and 'rec' currently";
+      return false;
+    }
 
     size_t cpu_cores = std::thread::hardware_concurrency();
     size_t thread_num = std::clamp((cpu_cores == 0) ? 8 : cpu_cores / 2,
@@ -121,12 +129,13 @@ XLLM_Response LLM::Completions(const std::string& model_id,
                                const std::string& prompt,
                                uint32_t timeout_ms,
                                const XLLM_RequestParams& request_params) {
-  return detail::handle_inference_request(llm_core_,
-                                          model_id,
-                                          prompt,
-                                          timeout_ms,
-                                          request_params,
-                                          detail::InterfaceType::COMPLETIONS);
+  return detail::handle_llm_inference_request(
+      llm_core_,
+      model_id,
+      prompt,
+      timeout_ms,
+      request_params,
+      detail::InterfaceType::COMPLETIONS);
 }
 
 XLLM_Response LLM::ChatCompletions(
@@ -140,12 +149,28 @@ XLLM_Response LLM::ChatCompletions(
     internal_messages.emplace_back(msg.role, msg.content);
   }
 
-  return detail::handle_inference_request(
+  return detail::handle_llm_inference_request(
       llm_core_,
       model_id,
       internal_messages,
       timeout_ms,
       request_params,
       detail::InterfaceType::CHAT_COMPLETIONS);
+}
+
+XLLM_Response LLM::BehaviorCompletions(
+    const std::string& model_id,
+    std::optional<std::vector<int>> input_tokens,
+    std::optional<std::vector<int>> input_indices,
+    std::optional<std::vector<std::vector<float>>> input_embedding,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams& request_params) {
+  return detail::handle_llm_rec_inference_request(llm_core_,
+                                                  model_id,
+                                                  std::move(input_tokens),
+                                                  std::move(input_indices),
+                                                  std::move(input_embedding),
+                                                  timeout_ms,
+                                                  request_params);
 }
 }  // namespace xllm

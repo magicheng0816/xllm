@@ -113,8 +113,13 @@ void DistManager::setup_multi_node_workers(
   WorkerType worker_type("LLM");
   const auto& model_backend = options.backend();
   if (model_backend == "llm") {
-    worker_type =
-        (options.task_type() == "generate") ? WorkerType::LLM : WorkerType::ELM;
+    if (options.task_type() == "rec") {
+      worker_type = WorkerType::LLMREC;
+    } else if (options.task_type() == "generate") {
+      worker_type = WorkerType::LLM;
+    } else {
+      worker_type = WorkerType::ELM;
+    }
   } else if (model_backend == "vlm") {
     worker_type = (options.task_type() == "generate") ? WorkerType::VLM
                                                       : WorkerType::EVLM;

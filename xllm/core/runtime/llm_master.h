@@ -105,7 +105,7 @@ class LLMMaster : public Master {
       std::optional<Call*> call,
       OutputCallback callback);
 
- private:
+ protected:
   std::unique_ptr<Scheduler> scheduler_;
 
   // model args

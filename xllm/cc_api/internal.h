@@ -21,6 +21,7 @@ limitations under the License.
 #include "core/framework/request/request_output.h"
 #include "core/framework/request/request_params.h"
 #include "core/runtime/llm_master.h"
+#include "core/runtime/rec_master.h"
 #include "core/util/uuid.h"
 #include "types.h"
 
@@ -31,7 +32,10 @@ struct LLMCore {
   std::vector<std::string> model_ids;
 
   // Master controller for LLM runtime management
-  std::unique_ptr<LLMMaster> master;
+  std::unique_ptr<LLMMaster> llm_master;
+
+  // Master controller for LLMRec runtime management
+  std::unique_ptr<LLMRecMaster> llmrec_master;
 
   // Thread pool for asynchronous task execution
   std::unique_ptr<folly::CPUThreadPoolExecutor> executor;
@@ -47,7 +51,7 @@ std::string generate_request_id() {
 }
 }  // namespace
 
-enum class InterfaceType { COMPLETIONS, CHAT_COMPLETIONS };
+enum class InterfaceType { COMPLETIONS, CHAT_COMPLETIONS, BEHAVIOR_COMPLETION };
 
 RequestParams transfer_request_params(
     const XLLM_RequestParams& request_params) {
@@ -90,6 +94,8 @@ XLLM_Response build_success_response(const RequestOutput& output,
     response.object = "text_completion";
   } else if (if_type == InterfaceType::CHAT_COMPLETIONS) {
     response.object = "chat.completion";
+  } else if (if_type == InterfaceType::BEHAVIOR_COMPLETION) {
+    response.object = "behaior.completion";
   }
 
   response.choices.reserve(output.outputs.size());
@@ -166,12 +172,13 @@ XLLM_Response build_error_response(const std::string& request_id,
 }
 
 template <typename InputType>
-XLLM_Response handle_inference_request(LLMCore* llm_core,
-                                       const std::string& model_id,
-                                       const InputType& input,
-                                       uint32_t timeout_ms,
-                                       const XLLM_RequestParams& request_params,
-                                       InterfaceType interface_type) {
+XLLM_Response handle_llm_inference_request(
+    LLMCore* llm_core,
+    const std::string& model_id,
+    const InputType& input,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams& request_params,
+    InterfaceType interface_type) {
   if (!llm_core) {
     return build_error_response(
         "", XLLM_StatusCode::kNotInitialized, "LLM is not initialized");
@@ -195,7 +202,7 @@ XLLM_Response handle_inference_request(LLMCore* llm_core,
     auto promise_ptr = std::make_shared<folly::Promise<XLLM_Response>>();
     auto future = promise_ptr->getSemiFuture();
 
-    llm_core->master->handle_request(
+    llm_core->llm_master->handle_request(
         input,
         std::nullopt,
         xllm_request_params,
@@ -204,6 +211,71 @@ XLLM_Response handle_inference_request(LLMCore* llm_core,
             const RequestOutput& req_output) -> bool {
           XLLM_Response response = build_success_response(
               req_output, interface_type, request_id, created_time, model_id);
+          promise_ptr->setValue(response);
+          return true;
+        });
+
+    return std::move(future)
+        .via(llm_core->executor.get())
+        .within(std::chrono::milliseconds(timeout_ms))
+        .get();
+
+  } catch (const folly::FutureTimeout& e) {
+    return build_error_response(
+        request_id, XLLM_StatusCode::kTimeout, "Request timed out");
+  } catch (const std::exception& e) {
+    return build_error_response(
+        request_id,
+        XLLM_StatusCode::kInternalError,
+        "Failed to handle request: " + std::string(e.what()));
+  }
+}
+
+XLLM_Response handle_llm_rec_inference_request(
+    LLMCore* llm_core,
+    const std::string& model_id,
+    std::optional<std::vector<int>> input_tokens,
+    std::optional<std::vector<int>> input_indices,
+    std::optional<std::vector<std::vector<float>>> input_embedding,
+    uint32_t timeout_ms,
+    const XLLM_RequestParams& request_params) {
+  if (!llm_core) {
+    return build_error_response(
+        "", XLLM_StatusCode::kNotInitialized, "LLM is not initialized");
+  }
+
+  auto it = std::find(
+      llm_core->model_ids.begin(), llm_core->model_ids.end(), model_id);
+  if (it == llm_core->model_ids.end()) {
+    return build_error_response("",
+                                XLLM_StatusCode::kModelNotFound,
+                                "Specified model ID not loaded: " + model_id);
+  }
+
+  RequestParams xllm_request_params = transfer_request_params(request_params);
+  std::string request_id = xllm_request_params.request_id.empty()
+                               ? generate_request_id()
+                               : xllm_request_params.request_id;
+  int64_t created_time = absl::ToUnixSeconds(absl::Now());
+
+  try {
+    auto promise_ptr = std::make_shared<folly::Promise<XLLM_Response>>();
+    auto future = promise_ptr->getSemiFuture();
+
+    llm_core->llmrec_master->handle_request(
+        std::move(input_tokens),
+        std::move(input_indices),
+        std::move(input_embedding),
+        xllm_request_params,
+        std::nullopt,
+        [model_id, request_id, created_time, promise_ptr](
+            const RequestOutput& req_output) -> bool {
+          XLLM_Response response =
+              build_success_response(req_output,
+                                     InterfaceType::BEHAVIOR_COMPLETION,
+                                     request_id,
+                                     created_time,
+                                     model_id);
           promise_ptr->setValue(response);
           return true;
         });

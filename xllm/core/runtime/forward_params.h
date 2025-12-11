@@ -33,11 +33,12 @@ class WorkerType {
  public:
   enum Value : int8_t {
     INVALID = 0,
-    LLM,   // LLM
-    VLM,   // VLM
-    DIT,   // DIT
-    ELM,   // Embedding LM
-    EVLM,  // Embedding VLM
+    LLM,     // LLM
+    VLM,     // VLM
+    DIT,     // DIT
+    ELM,     // Embedding LM
+    EVLM,    // Embedding VLM
+    LLMREC,  // LLM REC
   };
 
   constexpr WorkerType(Value v) : value_(v) {}
@@ -52,6 +53,8 @@ class WorkerType {
       value_ = ELM;
     } else if (str == "EVLM") {
       value_ = EVLM;
+    } else if (str == "LLMREC") {
+      value_ = LLMREC;
     } else {
       value_ = INVALID;
     }
@@ -78,6 +81,8 @@ class WorkerType {
       return "ELM";
     } else if (this->value_ == EVLM) {
       return "EVLM";
+    } else if (this->value_ == LLMREC) {
+      return "LLMREC";
     } else {
       return "INVALID";
     }
