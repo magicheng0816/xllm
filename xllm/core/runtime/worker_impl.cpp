@@ -79,7 +79,10 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
 
   device_.set_device();
   device_.init_device_context();
-  threadpool_.schedule([this]() mutable { device_.set_device(); });
+  // threadpool_.schedule([this]() mutable { device_.set_device(); });
+  threadpool_ = std::make_unique<ThreadPool>(
+      8, [this]() mutable { device_.set_device(); });
+
   prepare_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
 }
@@ -309,7 +312,7 @@ folly::SemiFuture<std::tuple<int64_t, int64_t>>
 WorkerImpl::estimate_kv_cache_capacity_async() {
   folly::Promise<std::tuple<int64_t, int64_t>> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+  threadpool_->schedule([this, promise = std::move(promise)]() mutable {
     const auto output = this->estimate_kv_cache_capacity();
     promise.setValue(output);
   });
@@ -434,9 +437,9 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
 
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this,
-                        input = std::move(input_on_device),
-                        promise = std::move(promise)]() mutable {
+  threadpool_->schedule([this,
+                         input = std::move(input_on_device),
+                         promise = std::move(promise)]() mutable {
     if (hierarchy_kv_cache_transfer_ != nullptr) {
       hierarchy_kv_cache_transfer_->set_layer_synchronizer(input.input_params);
     }
@@ -494,7 +497,7 @@ ForwardOutput WorkerImpl::get_last_step_result() {
 folly::SemiFuture<folly::Unit> WorkerImpl::process_group_test_async() {
   folly::Promise<folly::Unit> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, promise = std::move(promise)]() mutable {
+  threadpool_->schedule([this, promise = std::move(promise)]() mutable {
     this->process_group_test();
     promise.setValue();
   });
@@ -507,10 +510,10 @@ folly::SemiFuture<bool> WorkerImpl::init_model_async(
     int32_t random_seed) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this,
-                        model_weights_path,
-                        random_seed,
-                        promise = std::move(promise)]() mutable {
+  threadpool_->schedule([this,
+                         model_weights_path,
+                         random_seed,
+                         promise = std::move(promise)]() mutable {
     auto status = this->init_model(model_weights_path, random_seed);
     promise.setValue(status);
   });
@@ -602,7 +605,7 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_async(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule(
+  threadpool_->schedule(
       [this, &kv_cache_shape, promise = std::move(promise)]() mutable {
         const bool success = this->allocate_kv_cache(kv_cache_shape);
         promise.setValue(success);
@@ -614,10 +617,11 @@ folly::SemiFuture<bool> WorkerImpl::allocate_continuous_kv_cache_async(
     const std::vector<XTensor::Options>& options) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this, options, promise = std::move(promise)]() mutable {
-    const bool success = this->allocate_continuous_kv_cache(options);
-    promise.setValue(success);
-  });
+  threadpool_->schedule(
+      [this, options, promise = std::move(promise)]() mutable {
+        const bool success = this->allocate_continuous_kv_cache(options);
+        promise.setValue(success);
+      });
   return future;
 }
 
@@ -658,10 +662,10 @@ folly::SemiFuture<bool> WorkerImpl::allocate_kv_cache_with_transfer_async(
     const std::vector<std::vector<int64_t>>& kv_cache_shape) {
   folly::Promise<bool> promise;
   auto future = promise.getSemiFuture();
-  threadpool_.schedule([this,
-                        kv_cache_size,
-                        &kv_cache_shape,
-                        promise = std::move(promise)]() mutable {
+  threadpool_->schedule([this,
+                         kv_cache_size,
+                         &kv_cache_shape,
+                         promise = std::move(promise)]() mutable {
     const bool success =
         this->allocate_kv_cache_with_transfer(kv_cache_size, kv_cache_shape);
     promise.setValue(success);

@@ -25,10 +25,27 @@ BaseExecutorImpl::BaseExecutorImpl(CausalLM* model,
                                    const ModelArgs& args,
                                    const torch::Device& device,
                                    const runtime::Options& options)
-    : model_(model), args_(args), device_(device), options_(options) {}
+    : model_(model), args_(args), device_(device), options_(options) {
+  for (int i = 0; i < 10; i++) {
+    auto stream = std::make_unique<Stream>(100);
+    streams_.push_back(std::move(stream));
+  }
+}
 
 ForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
-  return batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+  std::thread::id current_thread_id = std::this_thread::get_id();
+  std::hash<std::thread::id> tid_hasher;
+  size_t tid_hash = tid_hasher(current_thread_id);
+  int index = static_cast<int>(tid_hash % static_cast<size_t>(10));
+
+  c10::StreamGuard stream_guard = streams_[index]->set_stream_guard();
+
+  auto input =
+      batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+
+  streams_[index]->synchronize();
+
+  return input;
 }
 
 torch::Tensor BaseExecutorImpl::run(const torch::Tensor& tokens,
@@ -36,7 +53,19 @@ torch::Tensor BaseExecutorImpl::run(const torch::Tensor& tokens,
                                     std::vector<KVCache>& kv_caches,
                                     const ModelInputParams& params) {
   COUNTER_INC(num_model_execution_total_eager);
-  return model_->forward(tokens, positions, kv_caches, params);
+  std::thread::id current_thread_id = std::this_thread::get_id();
+  LOG(INFO) << "model forward at thread[" << current_thread_id << "]";
+  std::hash<std::thread::id> tid_hasher;
+  size_t tid_hash = tid_hasher(current_thread_id);
+  int index = static_cast<int>(tid_hash % static_cast<size_t>(10));
+
+  c10::StreamGuard stream_guard = streams_[index]->set_stream_guard();
+
+  auto tensor = model_->forward(tokens, positions, kv_caches, params);
+
+  streams_[index]->synchronize();
+
+  return tensor;
 }
 
 }  // namespace xllm

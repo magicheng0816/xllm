@@ -25,6 +25,7 @@ limitations under the License.
 #include "framework/kv_cache/kv_cache.h"
 #include "framework/model/causal_lm.h"
 #include "framework/model/model_input_params.h"
+#include "platform/stream.h"
 #include "runtime/executor_impl.h"
 #include "runtime/options.h"
 
@@ -53,6 +54,8 @@ class BaseExecutorImpl : public ExecutorImpl {
   ModelArgs args_;
   torch::Device device_;
   runtime::Options options_;
+
+  std::vector<std::unique_ptr<Stream>> streams_;
 };
 REGISTER_EXECUTOR("base", BaseExecutorImpl);
 }  // namespace xllm

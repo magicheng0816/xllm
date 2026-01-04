@@ -200,7 +200,8 @@ class WorkerImpl {
   // make sure only 1 thread in the pool
   // if enable_schedule_overlap, two step tasks might be dispatched to
   // the task queue, step need to be executed one-by-one
-  ThreadPool threadpool_;
+  // ThreadPool threadpool_{4};
+  std::unique_ptr<ThreadPool> threadpool_;
 
   // dtype of the model
   torch::ScalarType dtype_;
