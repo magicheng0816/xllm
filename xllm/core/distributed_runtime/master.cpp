@@ -227,7 +227,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .spawn_worker_path(options_.spawn_worker_path())
         .enable_shm(options_.enable_shm())
         .is_local(options_.is_local())
-        .server_idx(options_.server_idx());
+        .server_idx(options_.server_idx())
+        .num_model_executor_stream(options_.num_model_executor_stream());
 
     if (options_.device_ip().has_value()) {
       eng_options.device_ip(options_.device_ip().value());
@@ -259,7 +260,8 @@ Master::Master(const Options& options, EngineType type) : options_(options) {
         .ep_size(options_.ep_size())
         .max_seqs_per_batch(options_.max_seqs_per_batch())
         .max_tokens_per_chunk_for_prefill(
-            options_.max_tokens_per_chunk_for_prefill());
+            options_.max_tokens_per_chunk_for_prefill())
+        .num_model_executor_stream(options_.num_model_executor_stream());
 
     engine_ = std::make_unique<RecEngine>(eng_options);
   } else {

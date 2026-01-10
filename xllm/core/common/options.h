@@ -202,6 +202,9 @@ class Options {
 
   // Layer wise H2D copy batchs
   PROPERTY(uint32_t, layers_wise_copy_batchs) = 4;
+
+  // the number of streams utilized by the model executor during operation
+  PROPERTY(int32_t, num_model_executor_stream) = 4;
 };
 
 }  // namespace xllm

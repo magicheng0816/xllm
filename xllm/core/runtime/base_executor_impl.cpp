@@ -26,26 +26,33 @@ BaseExecutorImpl::BaseExecutorImpl(CausalLM* model,
                                    const torch::Device& device,
                                    const runtime::Options& options)
     : model_(model), args_(args), device_(device), options_(options) {
-  for (int i = 0; i < 10; i++) {
-    auto stream = std::make_unique<Stream>(100);
-    streams_.push_back(std::move(stream));
+  if (options_.num_model_executor_stream() > 1) {
+    for (int i = 0; i < options_.num_model_executor_stream(); i++) {
+      auto stream = std::make_unique<Stream>();
+      streams_.push_back(std::move(stream));
+    }
   }
 }
 
 ForwardInput BaseExecutorImpl::prepare_inputs(Batch& batch) {
-  std::thread::id current_thread_id = std::this_thread::get_id();
-  std::hash<std::thread::id> tid_hasher;
-  size_t tid_hash = tid_hasher(current_thread_id);
-  int index = static_cast<int>(tid_hash % static_cast<size_t>(10));
+  if (options_.num_model_executor_stream() > 1) {
+    std::hash<std::thread::id> tid_hasher;
+    size_t tid_hash = tid_hasher(std::this_thread::get_id());
+    int index = static_cast<int>(
+        tid_hash % static_cast<size_t>(options_.num_model_executor_stream()));
 
-  c10::StreamGuard stream_guard = streams_[index]->set_stream_guard();
+    c10::StreamGuard stream_guard = streams_[index]->set_stream_guard();
+    auto input =
+        batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+    streams_[index]->synchronize();
 
-  auto input =
-      batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
+    return input;
+  } else {
+    auto input =
+        batch.prepare_forward_input(options_.num_decoding_tokens(), 0, args_);
 
-  streams_[index]->synchronize();
-
-  return input;
+    return input;
+  }
 }
 
 torch::Tensor BaseExecutorImpl::run(const torch::Tensor& tokens,
@@ -53,19 +60,20 @@ torch::Tensor BaseExecutorImpl::run(const torch::Tensor& tokens,
                                     std::vector<KVCache>& kv_caches,
                                     const ModelInputParams& params) {
   COUNTER_INC(num_model_execution_total_eager);
-  std::thread::id current_thread_id = std::this_thread::get_id();
-  LOG(INFO) << "model forward at thread[" << current_thread_id << "]";
-  std::hash<std::thread::id> tid_hasher;
-  size_t tid_hash = tid_hasher(current_thread_id);
-  int index = static_cast<int>(tid_hash % static_cast<size_t>(10));
+  if (options_.num_model_executor_stream() > 1) {
+    std::hash<std::thread::id> tid_hasher;
+    size_t tid_hash = tid_hasher(std::this_thread::get_id());
+    int index = static_cast<int>(tid_hash % static_cast<size_t>(1));
 
-  c10::StreamGuard stream_guard = streams_[index]->set_stream_guard();
+    c10::StreamGuard stream_guard = streams_[index]->set_stream_guard();
+    auto tensor = model_->forward(tokens, positions, kv_caches, params);
+    streams_[index]->synchronize();
 
-  auto tensor = model_->forward(tokens, positions, kv_caches, params);
+    return tensor;
+  } else {
+    auto tensor = model_->forward(tokens, positions, kv_caches, params);
 
-  streams_[index]->synchronize();
-
-  return tensor;
+    return tensor;
+  }
 }
-
 }  // namespace xllm

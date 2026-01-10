@@ -17,6 +17,8 @@ limitations under the License.
 
 #include <thread>
 
+#include "util/timer.h"
+
 namespace xllm {
 ThreadPool::ThreadPool(size_t num_threads) : ThreadPool(num_threads, nullptr) {}
 
@@ -31,6 +33,10 @@ ThreadPool::ThreadPool(size_t num_threads, Runnable init_func)
       internal_loop(i, init_func_ptr, counter_ptr);
     });
   }
+  running_sizes_.reserve(num_threads);
+  runned_nums_.reserve(num_threads);
+  runned_timers_.reserve(num_threads);
+
   counter.wait();
 }
 
@@ -85,8 +91,48 @@ void ThreadPool::internal_loop(size_t index,
       // nullptr is a signal to exit
       break;
     }
+    Timer timer;
+    timer.reset();
+    running_sizes_[index]++;
     runnable();
+    running_sizes_[index]--;
+    runned_nums_[index]++;
+    runned_timers_[index] += timer.elapsed_milliseconds();
   }
+}
+
+int ThreadPool::waiting_runnable_size() {
+  int count = 0;
+  for (auto& queue : queues_) {
+    count += queue.size();
+  }
+
+  return count;
+}
+
+int ThreadPool::running_runnable_size() {
+  int count = 0;
+  for (auto& running_size : running_sizes_) {
+    count += running_size;
+  }
+
+  return count;
+}
+
+double ThreadPool::run_runnable_elapsed_time() {
+  std::vector<double> times;
+  times.reserve(runned_timers_.size());
+  for (int i = 0; i < runned_timers_.size(); i++) {
+    if (runned_nums_[i] == 0) return 0;
+    times[i] = runned_timers_[i] / runned_nums_[i];
+  }
+
+  double total = 0;
+  for (int i = 0; i < times.size(); i++) {
+    total += times[i];
+  }
+
+  return total / times.size();
 }
 
 }  // namespace xllm

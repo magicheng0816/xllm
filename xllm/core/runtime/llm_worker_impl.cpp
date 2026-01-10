@@ -100,6 +100,7 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     eplb_executor_->eplb_execute(input.eplb_info);
   }
 
+  Timer timer2;
   // temporarily use [0], will be adapted in next pr
   // call model executor forward to get hidden states
   auto hidden_states = model_executor_->forward(
@@ -107,6 +108,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
   if (!hidden_states.defined()) {
     return std::nullopt;
   }
+
+  HISTOGRAM_OBSERVE(time_to_worker_forward_latency_milliseconds,
+                    timer2.elapsed_milliseconds());
 
   torch::Tensor logits;
   if (sampling_params.selected_token_idxes.defined()) {
@@ -194,7 +198,9 @@ std::optional<ForwardOutput> LLMWorkerImpl::step(const ForwardInput& input) {
     }
   }
 
-  COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
+  // COUNTER_ADD(execution_latency_seconds_model, timer.elapsed_seconds());
+  HISTOGRAM_OBSERVE(time_to_worker_step_latency_milliseconds,
+                    timer.elapsed_milliseconds());
   DeviceMonitor::get_instance().update_active_activation_memory(
       device_.index());
 

@@ -126,6 +126,11 @@ DEFINE_HISTOGRAM(time_to_first_token_latency_milliseconds,
 DEFINE_HISTOGRAM(inter_token_latency_milliseconds,
                  "Histogram of inter token latency in milliseconds");
 
+DEFINE_HISTOGRAM(time_to_worker_step_latency_milliseconds,
+                 "Histogram of time to first token latency in milliseconds");
+DEFINE_HISTOGRAM(time_to_worker_forward_latency_milliseconds,
+                 "Histogram of time to first token latency in milliseconds");
+
 // response metrics
 DEFINE_COUNTER(responsing_latency_seconds_stream,
                "Latency of stream responding in seconds");

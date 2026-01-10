@@ -81,7 +81,7 @@ WorkerImpl::WorkerImpl(const ParallelArgs& parallel_args,
   device_.init_device_context();
   // threadpool_.schedule([this]() mutable { device_.set_device(); });
   threadpool_ = std::make_unique<ThreadPool>(
-      8, [this]() mutable { device_.set_device(); });
+      1, [this]() mutable { device_.set_device(); });
 
   prepare_stream_ = device_.get_stream_from_pool();
   sampler_ = std::make_unique<Sampler>();
@@ -437,6 +437,14 @@ folly::SemiFuture<std::optional<ForwardOutput>> WorkerImpl::step_async(
 
   folly::Promise<std::optional<ForwardOutput>> promise;
   auto future = promise.getSemiFuture();
+
+  LOG(INFO) << "model step, current total runnning size:"
+            << threadpool_->running_runnable_size()
+            << ",current total waiting size:"
+            << threadpool_->waiting_runnable_size()
+            << ", avg elapsed milliseconds:"
+            << threadpool_->run_runnable_elapsed_time();
+
   threadpool_->schedule([this,
                          input = std::move(input_on_device),
                          promise = std::move(promise)]() mutable {

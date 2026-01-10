@@ -55,6 +55,10 @@ class ThreadPool final {
 
   size_t size() { return threads_.size(); }
 
+  int waiting_runnable_size();
+  int running_runnable_size();
+  double run_runnable_elapsed_time();
+
  private:
   void internal_loop(size_t tid,
                      Runnable* init_func,
@@ -64,6 +68,12 @@ class ThreadPool final {
   std::vector<ConcurrentQueue<Runnable>> queues_;
 
   std::atomic<size_t> index_{0};
+
+  std::vector<int> running_sizes_;
+
+  std::vector<int> runned_nums_;
+
+  std::vector<double> runned_timers_;
 };
 
 }  // namespace xllm

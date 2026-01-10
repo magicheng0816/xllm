@@ -241,6 +241,8 @@ DECLARE_double(dit_cache_residual_diff_threshold);
 
 DECLARE_bool(enable_constrained_decoding);
 
+DECLARE_int32(num_model_executor_stream);
+
 #if defined(USE_NPU)
 DECLARE_string(npu_kernel_backend);
 #endif

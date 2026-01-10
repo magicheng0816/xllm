@@ -235,7 +235,8 @@ int run() {
       .max_requests_per_batch(FLAGS_max_requests_per_batch)
       .enable_continuous_kvcache(FLAGS_enable_continuous_kvcache)
       .enable_shm(FLAGS_enable_shm)
-      .is_local(is_local);
+      .is_local(is_local)
+      .num_model_executor_stream(FLAGS_num_model_executor_stream);
 
   InstanceName::name()->set_name(options.instance_name().value_or(""));
 

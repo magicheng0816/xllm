@@ -494,6 +494,11 @@ DEFINE_bool(enable_constrained_decoding,
             "that the output meets specific format or structural requirements "
             "through pre-defined rules.");
 
+DEFINE_int32(
+    num_model_executor_stream,
+    4,
+    "The number of streams utilized by the model executor during operation.");
+
 #if defined(USE_NPU)
 DEFINE_string(
     npu_kernel_backend,
