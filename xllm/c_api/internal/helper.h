@@ -161,6 +161,7 @@ XLLM_Response* handle_inference_request(
     InferenceType inference_type,
     const std::string& model_id,
     const InputType& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -174,5 +175,14 @@ void xllm_free_response(XLLM_Response* resp);
  */
 std::string generate_request_id();
 
+torch::ScalarType xllm_dtype_to_torch_scalar_type(XLLM_DataType dtype);
+
+torch::Tensor convert_xllm_tensor_to_torch(const XLLM_Tensor& xllm_tensor);
+
+xllm::MMDataItem convert_xllm_mm_item_to_internal(
+    const XLLM_MM_Item& xllm_item);
+
+bool convert_xllm_mm_data_to_internal(const XLLM_MM_Data* mm_data,
+                                      xllm::MMData& internal_mm_data);
 }  // namespace helper
 }  // namespace xllm

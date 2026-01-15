@@ -14,6 +14,7 @@ limitations under the License.
 
 #include <glog/logging.h>
 #include <pthread.h>
+#include <torch/torch.h>
 
 #include <atomic>
 #include <string>
@@ -313,6 +314,7 @@ XLLM_Response* handle_inference_request(
     InferenceType inference_type,
     const std::string& model_id,
     const InputType& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params) {
   CHECK(nullptr != handler);
@@ -377,8 +379,22 @@ XLLM_Response* handle_inference_request(
                                       on_request_complete);
     } else if constexpr (std::is_same_v<HandlerType, XLLM_REC_Handler>) {
       if constexpr (std::is_same_v<InputType, std::vector<int>>) {
-        handler->master->handle_request(
-            "", input, std::nullopt, xllm_request_params, on_request_complete);
+        if (nullptr != extra) {
+          xllm::MMData* mm_data =
+              dynamic_cast<xllm::MMData*>(static_cast<xllm::MMData*>(extra));
+          CHECK(nullptr != mm_data);
+
+          std::optional<xllm::MMData> opt_mm_data = std::move(*mm_data);
+          handler->master->handle_request(
+              input, opt_mm_data, xllm_request_params, on_request_complete);
+
+        } else {
+          handler->master->handle_request("",
+                                          input,
+                                          std::nullopt,
+                                          xllm_request_params,
+                                          on_request_complete);
+        }
       } else {
         handler->master->handle_request(input,
                                         std::nullopt,
@@ -460,12 +476,184 @@ void xllm_free_response(XLLM_Response* resp) {
   return;
 }
 
+torch::ScalarType xllm_dtype_to_torch_scalar_type(XLLM_DataType dtype) {
+  switch (dtype) {
+    case XLLM_DTYPE_UNDEFINED:
+      throw std::runtime_error(
+          "XLLM_DTYPE_UNDEFINED is not a valid dtype for tensor conversion");
+    case XLLM_DTYPE_FLOAT16:
+      return torch::kFloat16;
+    case XLLM_DTYPE_FLOAT32:
+      return torch::kFloat32;
+    case XLLM_DTYPE_FLOAT64:
+      return torch::kFloat64;
+    case XLLM_DTYPE_BFLOAT16:
+      return torch::kBFloat16;
+    case XLLM_DTYPE_INT8:
+      return torch::kInt8;
+    case XLLM_DTYPE_INT16:
+      return torch::kInt16;
+    case XLLM_DTYPE_INT32:
+      return torch::kInt32;
+    case XLLM_DTYPE_INT64:
+      return torch::kInt64;
+    case XLLM_DTYPE_UINT8:
+      return torch::kUInt8;
+    case XLLM_DTYPE_UINT16:
+      return torch::kUInt16;
+    case XLLM_DTYPE_UINT32:
+      return torch::kUInt32;
+    case XLLM_DTYPE_UINT64:
+      return torch::kUInt64;
+    case XLLM_DTYPE_BOOL:
+      return torch::kBool;
+    case XLLM_DTYPE_STRING:
+      throw std::runtime_error(
+          "String dtype is not supported for torch::Tensor");
+    default:
+      throw std::runtime_error("Unsupported XLLM_DataType: " +
+                               std::to_string(dtype));
+  }
+}
+
+torch::Tensor convert_xllm_tensor_to_torch(const XLLM_Tensor& xllm_tensor) {
+  if (xllm_tensor.data == nullptr) {
+    throw std::runtime_error("XLLM_Tensor data pointer is null");
+  }
+
+  torch::ScalarType scalar_type =
+      xllm_dtype_to_torch_scalar_type(xllm_tensor.dtype);
+
+  std::vector<int64_t> shape;
+  for (int i = 0; i < xllm_tensor.dims.rank; ++i) {
+    int dim = xllm_tensor.dims.dim[i];
+    if (dim > 0) {
+      shape.push_back(dim);
+    }
+  }
+
+  if (shape.empty()) {
+    throw std::runtime_error("XLLM_Tensor all dimensions are invalid value");
+  }
+
+  torch::Tensor tensor =
+      torch::from_blob(const_cast<void*>(xllm_tensor.data), shape, scalar_type)
+          .clone();
+
+  return tensor;
+}
+
+xllm::MMDataItem convert_xllm_mm_item_to_internal(
+    const XLLM_MM_Item& xllm_item) {
+  uint32_t xllm_type_val = static_cast<uint32_t>(xllm_item.type);
+  xllm::MMType::Value internal_val = xllm::MMType::NONE;
+
+  switch (xllm_type_val) {
+    case XLLM_MM_TYPE_EMBEDDING:
+      internal_val = xllm::MMType::EMBEDDING;
+      break;
+    case XLLM_MM_TYPE_IMAGE:
+      internal_val = xllm::MMType::IMAGE;
+      break;
+    case XLLM_MM_TYPE_VIDEO:
+      internal_val = xllm::MMType::VIDEO;
+      break;
+    case XLLM_MM_TYPE_AUDIO:
+      internal_val = xllm::MMType::AUDIO;
+      break;
+    case XLLM_MM_TYPE_NONE:
+      internal_val = xllm::MMType::NONE;
+      break;
+    default:
+      throw std::runtime_error(std::string("Unsupported XLLM_MM_Type: ") +
+                               std::to_string(xllm_type_val));
+  }
+
+  xllm::MMType item_type(internal_val);
+  xllm::MMDataItem internal_item(item_type);
+
+  xllm::MMItemState& state = internal_item.mutable_state();
+  xllm::MMItemState::TokenPos& token_pos = state.mutable_token_pos();
+  token_pos.offset = xllm_item.state.token_pos.offset;
+  token_pos.length = xllm_item.state.token_pos.length;
+
+  if (xllm_item.data.is_single_tensor) {
+    torch::Tensor tensor =
+        convert_xllm_tensor_to_torch(xllm_item.data.data.tensor);
+    internal_item.add("tensor", tensor);
+  } else {
+    std::vector<torch::Tensor> tensor_list;
+    const XLLM_Tensors& xllm_tensors = xllm_item.data.data.tensors;
+    for (size_t i = 0; i < xllm_tensors.entries_size; ++i) {
+      tensor_list.push_back(
+          convert_xllm_tensor_to_torch(xllm_tensors.entries[i]));
+    }
+    internal_item.add("tensor_list", tensor_list);
+  }
+
+  return internal_item;
+}
+
+bool convert_xllm_mm_data_to_internal(const XLLM_MM_Data* mm_data,
+                                      xllm::MMData& internal_mm_data) {
+  if (mm_data == nullptr || mm_data->type_mask == XLLM_MM_TYPE_NONE) {
+    return false;
+  }
+
+  xllm::MMType::Value internal_val =
+      static_cast<xllm::MMType::Value>(mm_data->type_mask);
+  xllm::MMType mm_type(internal_val);
+
+  if (mm_data->is_dict) {
+    const XLLM_MM_Dict& xllm_dict = mm_data->data.dict;
+    xllm::MMDict internal_dict;
+
+    for (size_t i = 0; i < xllm_dict.entries_size; ++i) {
+      const XLLM_MM_DictEntry& xllm_entry = xllm_dict.entries[i];
+      xllm::MMKey key(xllm_entry.key);
+
+      const XLLM_MM_Value& xllm_value = xllm_entry.value;
+      if (xllm_value.is_single_tensor) {
+        torch::Tensor tensor =
+            convert_xllm_tensor_to_torch(xllm_value.data.tensor);
+        internal_dict.insert({key, tensor});
+      } else {
+        std::vector<torch::Tensor> tensor_list;
+        const XLLM_Tensors& xllm_tensors = xllm_value.data.tensors;
+        for (size_t j = 0; j < xllm_tensors.entries_size; ++j) {
+          tensor_list.push_back(
+              convert_xllm_tensor_to_torch(xllm_tensors.entries[j]));
+        }
+        internal_dict.insert({key, tensor_list});
+      }
+    }
+
+    internal_mm_data.set<xllm::MMDict>(mm_type, internal_dict);
+  } else {
+    const XLLM_MM_Items& xllm_items = mm_data->data.items;
+    xllm::MMItemVec internal_item_vec;
+
+    for (size_t i = 0; i < xllm_items.entries_size; ++i) {
+      const XLLM_MM_Item& xllm_item = xllm_items.entries[i];
+
+      xllm::MMDataItem internal_item =
+          convert_xllm_mm_item_to_internal(xllm_item);
+      internal_item_vec.push_back(std::move(internal_item));
+    }
+
+    internal_mm_data.set<xllm::MMItemVec>(mm_type, internal_item_vec);
+  }
+
+  return true;
+}
+
 // 1. LLM Handler + const char* (text completions)
 template XLLM_Response* handle_inference_request<XLLM_LLM_Handler, const char*>(
     XLLM_LLM_Handler* handler,
     InferenceType inference_type,
     const std::string& model_id,
     const char* const& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -476,6 +664,7 @@ handle_inference_request<XLLM_LLM_Handler, std::vector<xllm::Message>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<xllm::Message>& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -485,6 +674,7 @@ template XLLM_Response* handle_inference_request<XLLM_REC_Handler, const char*>(
     InferenceType inference_type,
     const std::string& model_id,
     const char* const& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -495,6 +685,7 @@ handle_inference_request<XLLM_REC_Handler, std::vector<xllm::Message>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<xllm::Message>& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 
@@ -505,6 +696,7 @@ handle_inference_request<XLLM_REC_Handler, std::vector<int>>(
     InferenceType inference_type,
     const std::string& model_id,
     const std::vector<int>& input,
+    void* extra,
     uint32_t timeout_ms,
     const XLLM_RequestParams* request_params);
 }  // namespace helper

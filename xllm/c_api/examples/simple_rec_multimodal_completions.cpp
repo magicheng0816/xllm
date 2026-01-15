@@ -31,6 +31,8 @@ std::string devices = "cuda:1";
 std::string model_name = "Qwen3-8B";
 std::string model_path = "/export/home/models/Qwen3-8B";
 
+#define MODEL_WORD_EMBEDDING_SIZE 4096
+
 class XLLM_MM_Data_Wrapper {
  public:
   XLLM_MM_Data_Wrapper() = default;
@@ -137,14 +139,15 @@ class XLLM_MM_Data_Wrapper {
            0,
            sizeof(item.data.data.tensor.dims.dim));
     item.data.data.tensor.dims.dim[0] = static_cast<int>(length);
-    item.data.data.tensor.dims.dim[1] = 4096;
+    item.data.data.tensor.dims.dim[1] = MODEL_WORD_EMBEDDING_SIZE;
 
-    const size_t buffer_size = length * 4096;
+    const size_t buffer_size = length * MODEL_WORD_EMBEDDING_SIZE;
     auto buffer = std::make_unique<float[]>(buffer_size);
     for (size_t i = 0; i < length; ++i) {
-      for (size_t j = 0; j < 4096; ++j) {
-        buffer[i * 4096 + j] =
-            static_cast<float>(i * 4096 + j) / static_cast<float>(buffer_size);
+      for (size_t j = 0; j < MODEL_WORD_EMBEDDING_SIZE; ++j) {
+        buffer[i * MODEL_WORD_EMBEDDING_SIZE + j] =
+            static_cast<float>(i * MODEL_WORD_EMBEDDING_SIZE + j) /
+            static_cast<float>(buffer_size);
       }
     }
 
@@ -162,8 +165,9 @@ XLLM_REC_Handler* service_startup_hook() {
   // the default value(XLLM_INIT_REC_OPTIONS_DEFAULT) will be used
   XLLM_InitOptions init_options;
   xllm_rec_init_options_default(&init_options);
-  snprintf(
-      init_options.log_dir, sizeof(init_options.log_dir), "/export/xllm/log");
+  // snprintf(
+  //     init_options.log_dir, sizeof(init_options.log_dir),
+  //     "/export/xllm/log");
 
   bool ret = xllm_rec_initialize(
       rec_handler, model_path.c_str(), devices.c_str(), &init_options);
@@ -206,7 +210,7 @@ int main(int argc, char** argv) {
   // and the default value(XLLM_REQUEST_PARAMS_DEFAULT) will be used
   XLLM_RequestParams request_params;
   xllm_rec_request_params_default(&request_params);
-  request_params.beam_width = 128;
+  // request_params.beam_width = 128;
 
   size_t token_size = 512;
   int token_ids[512] = {0};
@@ -242,6 +246,7 @@ int main(int argc, char** argv) {
     if (nullptr != resp->choices.entries) {
       for (int i = 0; i < resp->choices.entries_size; ++i) {
         XLLM_Choice& choice = resp->choices.entries[i];
+
         for (int j = 0; j < choice.logprobs.entries_size; j++) {
           XLLM_LogProb& logprob = choice.logprobs.entries[j];
           std::cout << "xllm answer[" << choice.index

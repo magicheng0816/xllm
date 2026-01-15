@@ -213,63 +213,40 @@ void RecWorkerImpl::LlmRecWithMmDataWorkPipeline::prepare_work_before_execute(
     return;
   }
 
-  torch::Tensor input_embedding;
-  torch::Tensor input_tokens_tensor;
-  torch::Tensor input_indices_tensor;
+  torch::Tensor multi_modal_values;
+  torch::Tensor multi_modal_indices;
 
-  const auto& mm_data = inputs.input_params.mm_data;
   const auto& processed_mm_data = processed_inputs.input_params.mm_data;
-
-  if (auto res = processed_mm_data.get<torch::Tensor>(LLM_REC_INPUT_TOKENS)) {
-    input_tokens_tensor = res.value();
+  if (auto res = processed_mm_data.get<torch::Tensor>("MULTI_MODAL_VALUES")) {
+    multi_modal_values = res.value();
   }
 
-  // Input indices are generated on host side.
-  if (auto res = mm_data.get<torch::Tensor>(LLM_REC_INPUT_INDICES)) {
-    input_indices_tensor = res.value();
+  if (auto res = processed_mm_data.get<torch::Tensor>("MULTI_MODAL_INDICES")) {
+    multi_modal_indices = res.value();
   }
 
-  if (auto res =
-          processed_mm_data.get<torch::Tensor>(LLM_REC_INPUT_EMBEDDING)) {
-    input_embedding = res.value();
+  if (!multi_modal_values.defined() || !multi_modal_indices.defined()) {
+    return;
   }
-
-  if (input_embedding.defined()) {
-    input_embedding = input_embedding.to(worker_.dtype());
-  }
-
-  if (input_indices_tensor.defined()) {
-    CHECK(input_tokens_tensor.defined())
-        << "LLM_REC_INPUT_TOKENS is required when LLM_REC_INPUT_INDICES is "
-           "set.";
 
 #if defined(USE_NPU)
-    layer::NpuWordEmbedding npu_word_embedding =
-        worker_.get_npu_word_embedding();
-    torch::Tensor input_tokens_embedding =
-        npu_word_embedding(input_tokens_tensor, 0);
+  layer::NpuWordEmbedding npu_word_embedding = worker_.get_npu_word_embedding();
+  torch::Tensor input_tokens_embedding =
+      npu_word_embedding(processed_inputs.token_ids, 0);
 #else
-    layer::WordEmbedding word_embedding = worker_.get_word_embedding();
-    torch::Tensor input_tokens_embedding =
-        word_embedding->forward(input_tokens_tensor);
+  layer::WordEmbedding word_embedding = worker_.get_word_embedding();
+  torch::Tensor input_tokens_embedding =
+      word_embedding->forward(processed_inputs.token_ids);
 #endif
 
-    if (input_embedding.defined()) {
-      torch::Tensor input_indices_cpu =
-          input_indices_tensor.to(torch::kCPU).to(torch::kInt64).contiguous();
-      const auto* input_indices_ptr = input_indices_cpu.data_ptr<int64_t>();
-      std::vector<int64_t> input_indices(
-          input_indices_ptr, input_indices_ptr + input_indices_cpu.numel());
+  std::vector<torch::indexing::TensorIndex> indices = {
+      torch::indexing::TensorIndex(multi_modal_indices),
+      torch::indexing::Slice()};
+  input_tokens_embedding.index_put_(indices, multi_modal_values);
 
-      processed_inputs.input_params.input_embedding =
-          worker_.merge_embeddings_by_indices(
-              input_tokens_embedding, input_embedding, input_indices);
-    } else {
-      processed_inputs.input_params.input_embedding = input_tokens_embedding;
-    }
-  } else if (input_embedding.defined()) {
-    processed_inputs.input_params.input_embedding = input_embedding;
-  }
+  processed_inputs.input_params.input_embedding = input_tokens_embedding;
+
+  return;
 }
 
 std::optional<ForwardOutput> RecWorkerImpl::LlmRecWithMmDataWorkPipeline::step(
